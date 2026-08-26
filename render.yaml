@@ -3,7 +3,7 @@ services:
     name: weather-mcp
     runtime: node
     plan: free
-    buildCommand: corepack enable && pnpm install --frozen-lockfile
+    buildCommand: pnpm install --frozen-lockfile
     startCommand: pnpm start
     healthCheckPath: /health
     autoDeployTrigger: commit

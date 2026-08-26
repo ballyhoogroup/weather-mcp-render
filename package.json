@@ -9,12 +9,14 @@
     "node": ">=20"
   },
   "scripts": {
+    "build": "node --check src/index.js",
     "start": "node src/index.js",
-    "test": "node --test"
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/node": "latest",
-    "@modelcontextprotocol/server": "latest",
-    "zod": "^4.0.0"
+    "@modelcontextprotocol/ext-apps": "1.7.5",
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "@supportbridge/sdk": "file:vendor/supportbridge-sdk-0.4.0.tgz",
+    "zod": "^3.25.76"
   }
 }

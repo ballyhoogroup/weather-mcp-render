@@ -1,7 +1,9 @@
 import { createServer } from "node:http";
-import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
-import { toNodeHandler } from "@modelcontextprotocol/node";
-import * as z from "zod/v4";
+import { pathToFileURL } from "node:url";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { SupportBridge } from "@supportbridge/sdk";
+import { z } from "zod";
 
 const PORT = Number.parseInt(process.env.PORT ?? "3000", 10);
 const HOST = "0.0.0.0";
@@ -72,8 +74,42 @@ export async function getWeather(location, units = "metric", forecastDays = 3) {
   };
 }
 
-function buildMcpServer() {
+export function buildMcpServer() {
   const server = new McpServer({ name: "weather-mcp-render", version: "1.0.0" });
+  const support = SupportBridge.install(server, {
+    source: "weather-mcp-render",
+    baseUrl: process.env.SUPPORTBRIDGE_URL ??
+      "https://supportbridge-control-plane.onrender.com",
+    apiKey: process.env.SUPPORTBRIDGE_API_KEY,
+    environment: process.env.NODE_ENV ?? "production",
+    serviceVersion: process.env.RENDER_GIT_COMMIT ?? "local",
+    identify: context => ({
+      userId:
+        context?.authInfo?.subject ??
+        context?.authInfo?.clientId ??
+        "test-user",
+      workspaceId:
+        context?.authInfo?.workspaceId ??
+        context?.authInfo?.organizationId ??
+        "test-workspace",
+      traits: {
+        customer:
+          context?.authInfo?.organizationName ??
+          "Test Customer"
+      }
+    })
+  });
+
+  const weatherHandler = async ({ location, units, forecastDays }) => {
+    try {
+      const weather = await getWeather(location, units, forecastDays);
+      return { content: [{ type: "text", text: JSON.stringify(weather, null, 2) }], structuredContent: weather };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown weather error";
+      return { isError: true, content: [{ type: "text", text: message }] };
+    }
+  };
+
   server.registerTool(
     "get_weather",
     {
@@ -85,39 +121,49 @@ function buildMcpServer() {
         forecastDays: z.number().int().min(1).max(7).default(3)
       })
     },
-    async ({ location, units, forecastDays }) => {
-      try {
-        const weather = await getWeather(location, units, forecastDays);
-        return { content: [{ type: "text", text: JSON.stringify(weather, null, 2) }], structuredContent: weather };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Unknown weather error";
-        return { isError: true, content: [{ type: "text", text: message }] };
-      }
-    }
+    support.instrumentTool("get_weather", weatherHandler)
   );
-  return server;
+  return { server, support };
 }
 
-const mcp = createMcpHandler(buildMcpServer);
-const handleMcp = toNodeHandler(mcp);
+export async function startServer({ port = PORT, host = HOST } = {}) {
+  const httpServer = createServer(async (req, res) => {
+    const pathname = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`).pathname;
+    if (req.method === "GET" && pathname === "/health") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true, service: "weather-mcp-render" }));
+      return;
+    }
+    if (pathname === "/mcp") {
+      const { server, support } = buildMcpServer();
+      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+      try {
+        await server.connect(transport);
+        await transport.handleRequest(req, res);
+      } finally {
+        await server.close();
+        await support.close();
+      }
+      return;
+    }
+    res.writeHead(404, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "Not found", mcpEndpoint: "/mcp", healthEndpoint: "/health" }));
+  });
 
-const httpServer = createServer(async (req, res) => {
-  const pathname = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`).pathname;
-  if (req.method === "GET" && pathname === "/health") {
-    res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: true, service: "weather-mcp-render" }));
-    return;
+  await new Promise(resolve => httpServer.listen(port, host, resolve));
+  console.log(`Weather MCP server listening on ${host}:${port}`);
+
+  return {
+    httpServer,
+    close: async () => {
+      await new Promise((resolve, reject) => httpServer.close(error => error ? reject(error) : resolve()));
+    }
+  };
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const running = await startServer();
+  for (const signal of ["SIGINT", "SIGTERM"]) {
+    process.once(signal, () => void running.close().finally(() => process.exit(0)));
   }
-  if (pathname === "/mcp") {
-    await handleMcp(req, res);
-    return;
-  }
-  res.writeHead(404, { "content-type": "application/json" });
-  res.end(JSON.stringify({ error: "Not found", mcpEndpoint: "/mcp", healthEndpoint: "/health" }));
-});
-
-httpServer.listen(PORT, HOST, () => console.log(`Weather MCP server listening on ${HOST}:${PORT}`));
-
-for (const signal of ["SIGINT", "SIGTERM"]) {
-  process.on(signal, () => httpServer.close(() => process.exit(0)));
 }

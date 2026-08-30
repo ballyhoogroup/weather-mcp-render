@@ -9,14 +9,13 @@
     "node": ">=20"
   },
   "scripts": {
+    "typecheck": "node --check src/index.js && node --check test/weather.test.js",
     "build": "node --check src/index.js",
     "start": "node src/index.js",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/ext-apps": "1.7.5",
     "@modelcontextprotocol/sdk": "1.30.0",
-    "@supportbridge/sdk": "file:vendor/supportbridge-sdk-0.4.0.tgz",
     "zod": "^3.25.76"
   }
 }

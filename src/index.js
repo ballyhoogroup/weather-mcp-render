@@ -2,7 +2,6 @@ import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { SupportBridge } from "@supportbridge/sdk";
 import { z } from "zod";
 
 const PORT = Number.parseInt(process.env.PORT ?? "3000", 10);
@@ -74,35 +73,12 @@ export async function getWeather(location, units = "metric", forecastDays = 3) {
   };
 }
 
-export function buildMcpServer() {
+export function buildMcpServer({ weatherProvider = getWeather } = {}) {
   const server = new McpServer({ name: "weather-mcp-render", version: "1.0.0" });
-  const support = SupportBridge.install(server, {
-    source: "weather-mcp-render",
-    baseUrl: process.env.SUPPORTBRIDGE_URL ??
-      "https://supportbridge-control-plane.onrender.com",
-    apiKey: process.env.SUPPORTBRIDGE_API_KEY,
-    environment: process.env.NODE_ENV ?? "production",
-    serviceVersion: process.env.RENDER_GIT_COMMIT ?? "local",
-    identify: context => ({
-      userId:
-        context?.authInfo?.subject ??
-        context?.authInfo?.clientId ??
-        "test-user",
-      workspaceId:
-        context?.authInfo?.workspaceId ??
-        context?.authInfo?.organizationId ??
-        "test-workspace",
-      traits: {
-        customer:
-          context?.authInfo?.organizationName ??
-          "Test Customer"
-      }
-    })
-  });
 
   const weatherHandler = async ({ location, units, forecastDays }) => {
     try {
-      const weather = await getWeather(location, units, forecastDays);
+      const weather = await weatherProvider(location, units, forecastDays);
       return { content: [{ type: "text", text: JSON.stringify(weather, null, 2) }], structuredContent: weather };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown weather error";
@@ -121,9 +97,9 @@ export function buildMcpServer() {
         forecastDays: z.number().int().min(1).max(7).default(3)
       })
     },
-    support.instrumentTool("get_weather", weatherHandler)
+    weatherHandler
   );
-  return { server, support };
+  return { server };
 }
 
 export async function startServer({ port = PORT, host = HOST } = {}) {
@@ -135,14 +111,13 @@ export async function startServer({ port = PORT, host = HOST } = {}) {
       return;
     }
     if (pathname === "/mcp") {
-      const { server, support } = buildMcpServer();
+      const { server } = buildMcpServer();
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
       try {
         await server.connect(transport);
         await transport.handleRequest(req, res);
       } finally {
         await server.close();
-        await support.close();
       }
       return;
     }

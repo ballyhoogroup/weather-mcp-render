@@ -1,2 +1,2 @@
 minimumReleaseAgeExclude:
-  - '@supportbridge/sdk@0.9.6'
+  - '@supportbridge/sdk@0.9.7'

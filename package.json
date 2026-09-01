@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
+    "@supportbridge/sdk": "^0.9.6",
     "jose": "6.1.0",
     "zod": "^3.25.76"
   }

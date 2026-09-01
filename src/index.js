@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { SupportBridge } from "@supportbridge/sdk";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { z } from "zod";
 
@@ -43,7 +44,23 @@ export function createAuth0Verifier(config) {
       algorithms: ["RS256"]
     });
     const scopes = typeof payload.scope === "string" ? payload.scope.split(" ").filter(Boolean) : [];
-    return { subject: payload.sub, scopes, expiresAt: payload.exp };
+    return {
+      subject: payload.sub,
+      clientId: payload.azp ?? payload.client_id,
+      scopes,
+      expiresAt: payload.exp
+    };
+  };
+}
+
+export function supportBridgeConfigFromEnv(env = process.env) {
+  if (!env.SUPPORTBRIDGE_API_KEY) return undefined;
+  return {
+    apiKey: env.SUPPORTBRIDGE_API_KEY,
+    baseUrl: env.SUPPORTBRIDGE_URL ?? "https://app2.getwith.in",
+    source: env.SUPPORTBRIDGE_SOURCE ?? "weather-mcp",
+    environment: env.NODE_ENV ?? "production",
+    serviceVersion: env.RENDER_GIT_COMMIT ?? "local"
   };
 }
 
@@ -90,7 +107,14 @@ async function authorizeRequest(req, res, config, verifyToken) {
       });
       return false;
     }
-    req.auth = authInfo;
+    req.auth = {
+      token: match[1],
+      clientId: authInfo.clientId ?? "unknown-client",
+      scopes: authInfo.scopes,
+      expiresAt: authInfo.expiresAt,
+      ...(config.audience ? { resource: new URL(config.audience) } : {}),
+      extra: { subject: authInfo.subject }
+    };
     return true;
   } catch {
     json(res, 401, { error: "invalid_token", error_description: "The bearer token is invalid or expired" }, {
@@ -166,8 +190,25 @@ export async function getWeather(location, units = "metric", forecastDays = 3) {
   };
 }
 
-export function buildMcpServer({ weatherProvider = getWeather } = {}) {
+export function buildMcpServer({
+  weatherProvider = getWeather,
+  supportBridgeConfig = supportBridgeConfigFromEnv()
+} = {}) {
   const server = new McpServer({ name: "weather-mcp-render", version: "1.0.0" });
+
+  const support = supportBridgeConfig
+    ? SupportBridge.install(server, {
+        ...supportBridgeConfig,
+        identify: context => {
+          const authInfo = context?.authInfo;
+          const subject = authInfo?.extra?.subject;
+          return {
+            userId: typeof subject === "string" ? subject : authInfo?.clientId ?? "weather-user",
+            workspaceId: "weather-mcp"
+          };
+        }
+      })
+    : undefined;
 
   const weatherHandler = async ({ location, units, forecastDays }) => {
     try {
@@ -190,9 +231,9 @@ export function buildMcpServer({ weatherProvider = getWeather } = {}) {
         forecastDays: z.number().int().min(1).max(7).default(3)
       })
     },
-    weatherHandler
+    support ? support.instrumentTool("get_weather", weatherHandler) : weatherHandler
   );
-  return { server };
+  return { server, support };
 }
 
 export async function startServer({
@@ -219,13 +260,14 @@ export async function startServer({
     }
     if (pathname === "/mcp") {
       if (!(await authorizeRequest(req, res, auth, tokenVerifier))) return;
-      const { server } = buildMcpServer();
+      const { server, support } = buildMcpServer();
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
       try {
         await server.connect(transport);
         await transport.handleRequest(req, res);
       } finally {
         await server.close();
+        await support?.close();
       }
       return;
     }

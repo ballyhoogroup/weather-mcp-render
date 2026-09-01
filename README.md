@@ -56,6 +56,13 @@ When enabled, `/mcp` requires an Auth0 RS256 access token containing the
 `weather:read` scope. The health route stays public. OAuth protected-resource
 metadata is published at `/.well-known/oauth-protected-resource/mcp`.
 
+## SupportBridge
+
+Set `SUPPORTBRIDGE_API_KEY` to enable the SupportBridge tools, MCP App resources,
+policy synchronization, and `get_weather` telemetry. The hosted control plane is
+configured with `SUPPORTBRIDGE_URL=https://app2.getwith.in`, and the source name
+defaults to `weather-mcp`. The SDK remains disabled when no API key is configured.
+
 ## Example prompt
 
 > Use get_weather to tell me the three-day forecast for Richmond, Virginia in imperial units.

@@ -11,8 +11,12 @@ const weatherResult = {
   source: "Open-Meteo"
 };
 
-async function connectTestClient() {
-  const { server } = buildMcpServer({ weatherProvider: async () => weatherResult });
+async function connectTestClient(options = {}) {
+  const { server, support } = buildMcpServer({
+    weatherProvider: async () => weatherResult,
+    supportBridgeConfig: undefined,
+    ...options
+  });
   const client = new Client({ name: "weather-mcp-test", version: "1.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
@@ -23,6 +27,7 @@ async function connectTestClient() {
     close: async () => {
       await client.close();
       await server.close();
+      await support?.close();
     }
   };
 }
@@ -57,6 +62,47 @@ test("get_weather preserves its structured result", async () => {
   } finally {
     await connection.close();
   }
+});
+
+test("SupportBridge installs its tools and instruments get_weather", async () => {
+  const requests = [];
+  const supportFetch = async (url, init = {}) => {
+    requests.push({ url: String(url), method: init.method ?? "GET", body: init.body });
+    if (String(url).endsWith("/v1/config")) {
+      return new Response(JSON.stringify({ triggers: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    }
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+  };
+  const connection = await connectTestClient({
+    supportBridgeConfig: {
+      apiKey: "test-key",
+      baseUrl: "https://support.example",
+      source: "weather-mcp",
+      fetch: supportFetch,
+      client: { http: { fetch: supportFetch }, buffer: { batchSize: 1 } },
+      policyApp: { enabled: false }
+    }
+  });
+  try {
+    const tools = await connection.client.listTools();
+    assert.ok(tools.tools.some(tool => tool.name === "get_weather"));
+    assert.ok(tools.tools.some(tool => tool.name === "talk_to_support"));
+
+    const result = await connection.client.callTool({
+      name: "get_weather",
+      arguments: { location: "Richmond, Virginia", units: "imperial", forecastDays: 1 }
+    });
+    assert.deepEqual(result.structuredContent, weatherResult);
+  } finally {
+    await connection.close();
+  }
+  assert.ok(requests.some(request => request.url.endsWith("/v1/events")));
 });
 
 const testAuth = {

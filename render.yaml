@@ -10,3 +10,7 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 22
+      - key: AUTH_REQUIRED
+        value: "false"
+      - key: PUBLIC_BASE_URL
+        value: https://weather-mcp-render-ss69.onrender.com

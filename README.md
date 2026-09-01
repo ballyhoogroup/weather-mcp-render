@@ -38,8 +38,23 @@ whose URL is:
 https://YOUR-SERVICE.onrender.com/mcp
 ```
 
-The server is intentionally unauthenticated for simplicity. Anyone who knows the
-URL can call it; add authentication before using private or paid data sources.
+## Auth0 OAuth
+
+The server can operate as an OAuth-protected MCP resource server. Create an
+Auth0 API with identifier `https://weather-mcp-render-ss69.onrender.com/mcp`, add
+the `weather:read` permission, and configure these environment variables:
+
+```text
+AUTH_REQUIRED=true
+PUBLIC_BASE_URL=https://weather-mcp-render-ss69.onrender.com
+AUTH0_ISSUER_BASE_URL=https://YOUR_AUTH0_DOMAIN/
+AUTH0_AUDIENCE=https://weather-mcp-render-ss69.onrender.com/mcp
+AUTH0_REQUIRED_SCOPE=weather:read
+```
+
+When enabled, `/mcp` requires an Auth0 RS256 access token containing the
+`weather:read` scope. The health route stays public. OAuth protected-resource
+metadata is published at `/.well-known/oauth-protected-resource/mcp`.
 
 ## Example prompt
 

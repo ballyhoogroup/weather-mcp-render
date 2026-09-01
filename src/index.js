@@ -2,10 +2,103 @@ import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import { z } from "zod";
 
 const PORT = Number.parseInt(process.env.PORT ?? "3000", 10);
 const HOST = "0.0.0.0";
+
+function normalizeIssuer(value) {
+  return value.endsWith("/") ? value : `${value}/`;
+}
+
+export function authConfigFromEnv(env = process.env) {
+  const enabled = env.AUTH_REQUIRED === "true";
+  if (!enabled) return { enabled: false };
+
+  const issuer = env.AUTH0_ISSUER_BASE_URL;
+  const audience = env.AUTH0_AUDIENCE;
+  const publicBaseUrl = env.PUBLIC_BASE_URL;
+  if (!issuer || !audience || !publicBaseUrl) {
+    throw new Error(
+      "AUTH_REQUIRED=true requires AUTH0_ISSUER_BASE_URL, AUTH0_AUDIENCE, and PUBLIC_BASE_URL"
+    );
+  }
+
+  return {
+    enabled: true,
+    issuer: normalizeIssuer(issuer),
+    audience,
+    publicBaseUrl: publicBaseUrl.replace(/\/$/, ""),
+    requiredScope: env.AUTH0_REQUIRED_SCOPE ?? "weather:read"
+  };
+}
+
+export function createAuth0Verifier(config) {
+  const jwks = createRemoteJWKSet(new URL(".well-known/jwks.json", config.issuer));
+  return async token => {
+    const { payload } = await jwtVerify(token, jwks, {
+      issuer: config.issuer,
+      audience: config.audience,
+      algorithms: ["RS256"]
+    });
+    const scopes = typeof payload.scope === "string" ? payload.scope.split(" ").filter(Boolean) : [];
+    return { subject: payload.sub, scopes, expiresAt: payload.exp };
+  };
+}
+
+export function protectedResourceMetadata(config) {
+  return {
+    resource: `${config.publicBaseUrl}/mcp`,
+    authorization_servers: [config.issuer],
+    scopes_supported: [config.requiredScope],
+    bearer_methods_supported: ["header"]
+  };
+}
+
+function json(res, status, body, headers = {}) {
+  res.writeHead(status, {
+    "content-type": "application/json",
+    "access-control-allow-origin": "*",
+    ...headers
+  });
+  res.end(JSON.stringify(body));
+}
+
+async function authorizeRequest(req, res, config, verifyToken) {
+  if (!config.enabled) return true;
+
+  const resourceMetadataUrl = `${config.publicBaseUrl}/.well-known/oauth-protected-resource/mcp`;
+  const challenge = `Bearer resource_metadata="${resourceMetadataUrl}"`;
+  const authorization = req.headers.authorization ?? "";
+  const match = /^Bearer\s+(.+)$/i.exec(authorization);
+  if (!match) {
+    json(res, 401, { error: "invalid_token", error_description: "A bearer token is required" }, {
+      "www-authenticate": challenge
+    });
+    return false;
+  }
+
+  try {
+    const authInfo = await verifyToken(match[1]);
+    if (!authInfo.expiresAt || authInfo.expiresAt <= Math.floor(Date.now() / 1000)) {
+      throw new Error("Token is expired");
+    }
+    if (!authInfo.scopes.includes(config.requiredScope)) {
+      json(res, 403, { error: "insufficient_scope", required_scope: config.requiredScope }, {
+        "www-authenticate": `${challenge}, error="insufficient_scope", scope="${config.requiredScope}"`
+      });
+      return false;
+    }
+    req.auth = authInfo;
+    return true;
+  } catch {
+    json(res, 401, { error: "invalid_token", error_description: "The bearer token is invalid or expired" }, {
+      "www-authenticate": `${challenge}, error="invalid_token"`
+    });
+    return false;
+  }
+}
 
 const weatherDescriptions = {
   0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
@@ -102,7 +195,12 @@ export function buildMcpServer({ weatherProvider = getWeather } = {}) {
   return { server };
 }
 
-export async function startServer({ port = PORT, host = HOST } = {}) {
+export async function startServer({
+  port = PORT,
+  host = HOST,
+  auth = authConfigFromEnv(),
+  tokenVerifier = auth.enabled ? createAuth0Verifier(auth) : undefined
+} = {}) {
   const httpServer = createServer(async (req, res) => {
     const pathname = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`).pathname;
     if (req.method === "GET" && pathname === "/health") {
@@ -110,7 +208,17 @@ export async function startServer({ port = PORT, host = HOST } = {}) {
       res.end(JSON.stringify({ ok: true, service: "weather-mcp-render" }));
       return;
     }
+    if (
+      auth.enabled &&
+      req.method === "GET" &&
+      (pathname === "/.well-known/oauth-protected-resource/mcp" ||
+        pathname === "/.well-known/oauth-protected-resource")
+    ) {
+      json(res, 200, protectedResourceMetadata(auth));
+      return;
+    }
     if (pathname === "/mcp") {
+      if (!(await authorizeRequest(req, res, auth, tokenVerifier))) return;
       const { server } = buildMcpServer();
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
       try {

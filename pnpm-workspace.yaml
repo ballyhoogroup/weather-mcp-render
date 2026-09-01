@@ -1,0 +1,2 @@
+minimumReleaseAgeExclude:
+  - '@supportbridge/sdk@0.9.6'

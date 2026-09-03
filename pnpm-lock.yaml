@@ -12,8 +12,8 @@ importers:
         specifier: 1.30.0
         version: 1.30.0(zod@3.25.76)
       '@supportbridge/sdk':
-        specifier: 0.9.7
-        version: 0.9.7(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))
+        specifier: 0.9.10
+        version: 0.9.10(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))
       jose:
         specifier: 6.1.0
         version: 6.1.0
@@ -56,8 +56,8 @@ packages:
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
-  '@supportbridge/sdk@0.9.7':
-    resolution: {integrity: sha512-wXZjfpP0O8NaW3wo2kMoC2kukmaCm4mdnELIkzzUQGZN5oL8B+Kpzh7Fou8yUDeHRi0dZ8K2tMc0L4j4LvuOvw==}
+  '@supportbridge/sdk@0.9.10':
+    resolution: {integrity: sha512-jw64DDjRQzoPRpKGiY13e95Ppm1G/Y8ZCR5hiZVs+1vERdWoNVQ1938Z2mGsQRtDnstgYnjmx8oS6llSbpWqmw==}
     engines: {node: '>=20'}
     hasBin: true
     peerDependencies:
@@ -456,7 +456,7 @@ snapshots:
 
   '@standard-schema/spec@1.1.0': {}
 
-  '@supportbridge/sdk@0.9.7(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))':
+  '@supportbridge/sdk@0.9.10(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))':
     dependencies:
       '@modelcontextprotocol/ext-apps': 1.7.5(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(zod@3.25.76)
       '@modelcontextprotocol/sdk': 1.30.0(zod@3.25.76)
